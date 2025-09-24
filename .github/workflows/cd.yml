@@ -8,6 +8,9 @@ on:
       - qa
       - main
 
+permissions:
+  contents: write
+
 jobs:
   versioning:
     if: github.event.pull_request.merged == true
