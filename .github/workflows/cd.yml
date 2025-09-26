@@ -41,7 +41,6 @@ jobs:
           base_branch="${{ github.base_ref }}"
           pre="${{ steps.prerelease.outputs.pre }}"
 
-          # For QA, base off latest dev alpha tag
           if [ "$base_branch" = "qa" ]; then
               latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1)
               if [ -z "$latest" ]; then
@@ -50,7 +49,6 @@ jobs:
           elif [ "$base_branch" = "dev" ]; then
               latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1 || echo "0.0.0")
           else
-              # main branch, stable tags only
               latest=$(git tag --list "[0-9]*.[0-9]*.[0-9]*" | grep -v -E "-(alpha|beta|rc)\." | sort -V | tail -n1)
               if [ -z "$latest" ]; then
                   latest="0.0.0"
@@ -58,7 +56,7 @@ jobs:
           fi
 
           echo "latest=$latest" >> $GITHUB_OUTPUT
-          echo "Latest tag: $latest"
+          echo "ℹ️ Latest tag: $latest"
 
       - name: Determine bump type from PR title
         id: bump_type
@@ -79,15 +77,29 @@ jobs:
             exit 1
           fi
           echo "bump=$bump" >> $GITHUB_OUTPUT
+          echo "ℹ️ Bump type: $bump"
 
-      - name: Bump version
+      - name: Bump or Promote version
         id: bump_version
         run: |
           latest="${{ steps.get_version.outputs.latest }}"
           bump="${{ steps.bump_type.outputs.bump }}"
           pre="${{ steps.prerelease.outputs.pre }}"
 
-          # Strip any prerelease suffix
+          # Default latest if empty
+          if [ -z "$latest" ]; then
+            latest="0.0.0"
+          fi
+
+          # Detect previous prerelease
+          prev=""
+          if [[ "$latest" =~ -alpha\. ]]; then
+            prev="alpha"
+          elif [[ "$latest" =~ -beta\. ]]; then
+            prev="beta"
+          fi
+
+          # Strip prerelease suffix -> core_version
           core_version=$(echo "$latest" | cut -d'-' -f1)
 
           # Split into major/minor/patch safely
@@ -96,13 +108,23 @@ jobs:
           minor=${minor:-0}
           patch=${patch:-0}
 
-          # Apply bump
-          if [ "$bump" = "major" ]; then
-            major=$((major+1)); minor=0; patch=0
-          elif [ "$bump" = "minor" ]; then
-            minor=$((minor+1)); patch=0
-          elif [ "$bump" = "patch" ]; then
-            patch=$((patch+1))
+          # Decide if promotion (skip bump)
+          skip_bump=0
+          if [ "$pre" = "beta" ] && [ "$prev" = "alpha" ]; then
+            skip_bump=1
+          elif [ -z "$pre" ] && [ "$prev" = "beta" ]; then
+            skip_bump=1
+          fi
+
+          # Apply bump only if not promotion
+          if [ "$skip_bump" -eq 0 ]; then
+            if [ "$bump" = "major" ]; then
+              major=$((major+1)); minor=0; patch=0
+            elif [ "$bump" = "minor" ]; then
+              minor=$((minor+1)); patch=0
+            elif [ "$bump" = "patch" ]; then
+              patch=$((patch+1))
+            fi
           fi
 
           new_version="$major.$minor.$patch"
