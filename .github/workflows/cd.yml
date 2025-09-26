@@ -79,27 +79,15 @@ jobs:
           echo "bump=$bump" >> $GITHUB_OUTPUT
           echo "ℹ️ Bump type: $bump"
 
-      - name: Bump or Promote version
+            - name: Bump version
         id: bump_version
         run: |
           latest="${{ steps.get_version.outputs.latest }}"
           bump="${{ steps.bump_type.outputs.bump }}"
           pre="${{ steps.prerelease.outputs.pre }}"
+          base_branch="${{ github.base_ref }}"
 
-          # Default latest if empty
-          if [ -z "$latest" ]; then
-            latest="0.0.0"
-          fi
-
-          # Detect previous prerelease
-          prev=""
-          if [[ "$latest" =~ -alpha\. ]]; then
-            prev="alpha"
-          elif [[ "$latest" =~ -beta\. ]]; then
-            prev="beta"
-          fi
-
-          # Strip prerelease suffix -> core_version
+          # Strip prerelease suffix
           core_version=$(echo "$latest" | cut -d'-' -f1)
 
           # Split into major/minor/patch safely
@@ -108,16 +96,12 @@ jobs:
           minor=${minor:-0}
           patch=${patch:-0}
 
-          # Decide if promotion (skip bump)
-          skip_bump=0
-          if [ "$pre" = "beta" ] && [ "$prev" = "alpha" ]; then
-            skip_bump=1
-          elif [ -z "$pre" ] && [ "$prev" = "beta" ]; then
-            skip_bump=1
-          fi
-
-          # Apply bump only if not promotion
-          if [ "$skip_bump" -eq 0 ]; then
+          # Special case: main branch promotion from prerelease → stable
+          if [ "$base_branch" = "main" ] && [[ "$latest" == *-* ]]; then
+            new_version="$core_version"
+            echo "Promoting prerelease $latest → stable $new_version"
+          else
+            # Apply bump
             if [ "$bump" = "major" ]; then
               major=$((major+1)); minor=0; patch=0
             elif [ "$bump" = "minor" ]; then
@@ -125,15 +109,15 @@ jobs:
             elif [ "$bump" = "patch" ]; then
               patch=$((patch+1))
             fi
-          fi
 
-          new_version="$major.$minor.$patch"
+            new_version="$major.$minor.$patch"
 
-          # Handle prerelease numbering
-          if [ -n "$pre" ]; then
-            count=$(git tag --list "${new_version}-${pre}.*" | wc -l)
-            count=$((count+1))
-            new_version="${new_version}-${pre}.${count}"
+            # Handle prerelease numbering
+            if [ -n "$pre" ]; then
+              count=$(git tag --list "${new_version}-${pre}.*" | wc -l)
+              count=$((count+1))
+              new_version="${new_version}-${pre}.${count}"
+            fi
           fi
 
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
