@@ -38,15 +38,25 @@ jobs:
       - name: Get latest tag for this branch type
         id: get_version
         run: |
+          base_branch="${{ github.base_ref }}"
           pre="${{ steps.prerelease.outputs.pre }}"
-          if [ -n "$pre" ]; then
-            latest=$(git tag --list "*-${pre}.*" | sort -V | tail -n1)
+
+          # For QA, base off latest dev alpha tag
+          if [ "$base_branch" = "qa" ]; then
+              latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1)
+              if [ -z "$latest" ]; then
+                  latest="0.0.0"
+              fi
+          elif [ "$base_branch" = "dev" ]; then
+              latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1 || echo "0.0.0")
           else
-            latest=$(git tag --list "[0-9]*.[0-9]*.[0-9]*" | grep -v -E "-(alpha|beta|rc)\." | sort -V | tail -n1)
+              # main branch, stable tags only
+              latest=$(git tag --list "[0-9]*.[0-9]*.[0-9]*" | grep -v -E "-(alpha|beta|rc)\." | sort -V | tail -n1)
+              if [ -z "$latest" ]; then
+                  latest="0.0.0"
+              fi
           fi
-          if [ -z "$latest" ]; then
-            latest="0.0.0"
-          fi
+
           echo "latest=$latest" >> $GITHUB_OUTPUT
           echo "Latest tag: $latest"
 
@@ -77,7 +87,7 @@ jobs:
           bump="${{ steps.bump_type.outputs.bump }}"
           pre="${{ steps.prerelease.outputs.pre }}"
 
-          # Strip prerelease suffix if exists
+          # Strip any prerelease suffix
           core_version=$(echo "$latest" | cut -d'-' -f1)
 
           # Split into major/minor/patch safely
