@@ -35,24 +35,27 @@ jobs:
           fi
           echo "pre=$pre" >> $GITHUB_OUTPUT
 
-      - name: Get latest tag for this branch type
+      - name: Get latest tag for this branch type (handles promotions)
         id: get_version
         run: |
           base_branch="${{ github.base_ref }}"
-          pre="${{ steps.prerelease.outputs.pre }}"
-
-          if [ "$base_branch" = "qa" ]; then
-              latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1)
-              if [ -z "$latest" ]; then
-                  latest="0.0.0"
-              fi
-          elif [ "$base_branch" = "dev" ]; then
-              latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1 || echo "0.0.0")
+          # For dev/qa/main we choose appropriate base:
+          # - dev  => latest alpha
+          # - qa   => latest alpha (we promote dev->qa)
+          # - main => prefer latest beta (promote qa->main); fallback to stable tags
+          if [ "$base_branch" = "dev" ]; then
+            latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1 || echo "")
+            if [ -z "$latest" ]; then latest="0.0.0"; fi
+          elif [ "$base_branch" = "qa" ]; then
+            latest=$(git tag --list "*-alpha.*" | sort -V | tail -n1)
+            if [ -z "$latest" ]; then latest="0.0.0"; fi
           else
-              latest=$(git tag --list "[0-9]*.[0-9]*.[0-9]*" | grep -v -E "-(alpha|beta|rc)\." | sort -V | tail -n1)
-              if [ -z "$latest" ]; then
-                  latest="0.0.0"
-              fi
+            # main: try beta first (promotion from qa), otherwise use latest stable
+            latest=$(git tag --list "*-beta.*" | sort -V | tail -n1 || echo "")
+            if [ -z "$latest" ]; then
+              latest=$(git tag --list "[0-9]*.[0-9]*.[0-9]*" | grep -v -E "-(alpha|beta|rc)\." | sort -V | tail -n1 || echo "")
+              if [ -z "$latest" ]; then latest="0.0.0"; fi
+            fi
           fi
 
           echo "latest=$latest" >> $GITHUB_OUTPUT
@@ -79,7 +82,7 @@ jobs:
           echo "bump=$bump" >> $GITHUB_OUTPUT
           echo "ℹ️ Bump type: $bump"
 
-      - name: Bump version
+      - name: Bump or Promote version (promotion-aware)
         id: bump_version
         run: |
           latest="${{ steps.get_version.outputs.latest }}"
@@ -87,7 +90,20 @@ jobs:
           pre="${{ steps.prerelease.outputs.pre }}"
           base_branch="${{ github.base_ref }}"
 
-          # Strip prerelease suffix
+          # Default latest if empty
+          if [ -z "$latest" ]; then
+            latest="0.0.0"
+          fi
+
+          # Detect previous prerelease (if any)
+          prev=""
+          if [[ "$latest" =~ -alpha\. ]]; then
+            prev="alpha"
+          elif [[ "$latest" =~ -beta\. ]]; then
+            prev="beta"
+          fi
+
+          # Strip prerelease suffix -> core_version
           core_version=$(echo "$latest" | cut -d'-' -f1)
 
           # Split into major/minor/patch safely
@@ -96,23 +112,34 @@ jobs:
           minor=${minor:-0}
           patch=${patch:-0}
 
-          # Special case: main branch promotion from prerelease → stable
-          if [ "$base_branch" = "main" ] && [[ "$latest" == *-* ]]; then
+          # If we are promoting to main and latest is a prerelease (alpha/beta),
+          # then release the core stable version (no bump).
+          if [ "$base_branch" = "main" ] && [ -n "$prev" ]; then
             new_version="$core_version"
-            echo "Promoting prerelease $latest → stable $new_version"
+            echo "Promoting prerelease $latest -> stable $new_version"
           else
-            # Apply bump
-            if [ "$bump" = "major" ]; then
-              major=$((major+1)); minor=0; patch=0
-            elif [ "$bump" = "minor" ]; then
-              minor=$((minor+1)); patch=0
-            elif [ "$bump" = "patch" ]; then
-              patch=$((patch+1))
+            # Decide if this is a promotion between stages (skip bump)
+            # - alpha -> beta (dev -> qa)
+            # - beta  -> stable (qa -> main) handled above
+            skip_bump=0
+            if [ "$pre" = "beta" ] && [ "$prev" = "alpha" ]; then
+              skip_bump=1
+            fi
+
+            # Apply bump only if not a promotion
+            if [ "$skip_bump" -eq 0 ]; then
+              if [ "$bump" = "major" ]; then
+                major=$((major+1)); minor=0; patch=0
+              elif [ "$bump" = "minor" ]; then
+                minor=$((minor+1)); patch=0
+              elif [ "$bump" = "patch" ]; then
+                patch=$((patch+1))
+              fi
             fi
 
             new_version="$major.$minor.$patch"
 
-            # Handle prerelease numbering
+            # If target is a prerelease (alpha/beta) we must append prerelease suffix
             if [ -n "$pre" ]; then
               count=$(git tag --list "${new_version}-${pre}.*" | wc -l)
               count=$((count+1))
