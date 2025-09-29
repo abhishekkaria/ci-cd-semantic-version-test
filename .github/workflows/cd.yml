@@ -22,6 +22,26 @@ jobs:
         with:
           fetch-depth: 0  # fetch all tags
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Linter
+        run: npm run lint
+
+      - name: Run Tests
+        run: npm test --if-present
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # fetch all tags
+
       - name: Determine branch pre-release type
         id: prerelease
         run: |
@@ -146,3 +166,16 @@ jobs:
           git config user.email "github-actions@github.com"
           git tag -a "$new_version" -m "Release $new_version"
           git push origin "$new_version"
+      
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v3
+        env:
+          JF_ENV_ENTERPRISE_NODE: ${{ secrets.JF_ARTIFACTORY_DEPLOY_TOKEN }}
+
+      - name: Publish to Artifactory
+        run: |
+          new_version="${{ steps.bump_version.outputs.new_version }}"
+          package_name=$(node -p "require('./package.json').name" | sed 's/@//;s/\//-/')
+          npm pack
+          jfrog rt u "${package_name}-${new_version}.tgz" "node-package-manager/${package_name}/" --recursive=false
+
