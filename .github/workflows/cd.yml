@@ -79,7 +79,7 @@ jobs:
           echo "bump=$bump" >> $GITHUB_OUTPUT
           echo "ℹ️ Bump type: $bump"
 
-            - name: Bump version
+      - name: Bump version
         id: bump_version
         run: |
           latest="${{ steps.get_version.outputs.latest }}"
