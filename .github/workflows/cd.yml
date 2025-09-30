@@ -168,7 +168,7 @@ jobs:
           git push origin "$new_version"
       
       - name: Setup JFrog CLI
-        uses: jfrog/setup-jfrog-cli@v3
+        uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_ENV_ENTERPRISE_NODE: ${{ secrets.JF_ARTIFACTORY_DEPLOY_TOKEN }}
 
